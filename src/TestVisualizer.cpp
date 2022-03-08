@@ -32,6 +32,7 @@
 
 #include "Open3DNew.h"
 #include "nanoflann.hpp"
+#include "TestVisualizer.h"
 
 
 using namespace std;
@@ -217,57 +218,43 @@ void VisualizeRegistration(const open3d::geometry::PointCloud &source,
                                           "Registration result");
 }
 
-
-int main(int argc, char *argv[]) {
-    
+void icpdata(const char* data, const char* dataSource)
+{
     using namespace open3d;
-    //utility::SetVerbosityLevel(utility::VerbosityLevel::Debug);
-
-    //LOAD DATA-----------
-    
-    auto cloud_ptr_target = std::make_shared<geometry::PointCloud>();
-    auto cloud_ptr_source = std::make_shared<geometry::PointCloud>();
-    
-    char *data = "C:/Users/afiqa/Open3D/examples/test_data/ICP/cloud_bin_1.pcd";
-    char *dataSource = "C:/Users/afiqa//Open3D/examples/test_data/ICP/cloud_bin_0.pcd";
-
-    //------------------ Fast Global Transform++++++++++++++
-    
-    
     //declare and pre-process data (lower down to x voxel)
     std::shared_ptr<geometry::PointCloud> source, target;
     std::shared_ptr<pipelines::registration::Feature> source_fpfh, target_fpfh;
     std::tie(source, source_fpfh) = PreprocessPointCloud(dataSource);
-    std::tie(target, target_fpfh) = PreprocessPointCloud(data); 
+    std::tie(target, target_fpfh) = PreprocessPointCloud(data);
 
     // Prepare checkers
     std::vector<std::reference_wrapper<
-            const pipelines::registration::CorrespondenceChecker>>
-            correspondence_checker;
+        const pipelines::registration::CorrespondenceChecker>>
+        correspondence_checker;
     auto correspondence_checker_edge_length =
-            pipelines::registration::CorrespondenceCheckerBasedOnEdgeLength(
-                    0.9);
+        pipelines::registration::CorrespondenceCheckerBasedOnEdgeLength(
+            0.9);
     auto correspondence_checker_distance =
-            pipelines::registration::CorrespondenceCheckerBasedOnDistance(
-                    0.075);
+        pipelines::registration::CorrespondenceCheckerBasedOnDistance(
+            0.075);
     auto correspondence_checker_normal =
-            pipelines::registration::CorrespondenceCheckerBasedOnNormal(
-                    0.52359878);
+        pipelines::registration::CorrespondenceCheckerBasedOnNormal(
+            0.52359878);
     correspondence_checker.push_back(correspondence_checker_edge_length);
     correspondence_checker.push_back(correspondence_checker_distance);
     correspondence_checker.push_back(correspondence_checker_normal);
-    
-    
-    
+
+
+
     // Find correspondence filter by mutual filter
     int nPti = int(source->points_.size());
     int nPtj = int(target->points_.size());
-    
+
     KNearestNeighbour feature_tree_i(*source_fpfh);
     KNearestNeighbour feature_tree_j(*target_fpfh);
 
     std::vector<Eigen::Vector2i> corres_ji;
-   
+
     std::vector<int> i_to_j(nPti, -1);
 
     // Buffer all correspondences
@@ -276,24 +263,24 @@ int main(int argc, char *argv[]) {
         std::vector<double> dist_tmp(1);
 
         feature_tree_i.SearchKNN(Eigen::VectorXd(target_fpfh->data_.col(j)),
-                                 1, corres_tmp, dist_tmp);    
+            1, corres_tmp, dist_tmp);
         int i = corres_tmp[0];
         corres_ji.push_back(Eigen::Vector2i(i, j));
     }
-    
+
     //set mutual filter
     std::vector<Eigen::Vector2i> mutual;
-    
-    for (auto &corres : corres_ji) {
+
+    for (auto& corres : corres_ji) {
         int j = corres(1);
         int j2i = corres(0);
 
         std::vector<int> corres_tmp(1);
         std::vector<double> dist_tmp(1);
         feature_tree_j.SearchKNN(
-                Eigen::VectorXd(source_fpfh->data_.col(j2i)), 1,
-                corres_tmp, dist_tmp);
-              
+            Eigen::VectorXd(source_fpfh->data_.col(j2i)), 1,
+            corres_tmp, dist_tmp);
+
         int i2j = corres_tmp[0];
         if (i2j == j) {
             mutual.push_back(corres);
@@ -301,39 +288,59 @@ int main(int argc, char *argv[]) {
     }
 
     utility::LogDebug("{:d} points remain", mutual.size());
-    
+
     //perform fast global registration
-    
+
     Eigen::Matrix4d resultFastGlobalTrans = Eigen::Matrix4d::Identity();
-    
-    
-    auto resultFGT =  pipelines::registration::FastGlobalRegistrationBasedOnCorrespondence(*source, *target, mutual); 
+
+
+    auto resultFGT = pipelines::registration::FastGlobalRegistrationBasedOnCorrespondence(*source, *target, mutual);
     resultFastGlobalTrans = resultFGT.transformation_;
- 
+
     //------ICP Fine tuning+++++++++++++++---------
-    
-    
-    std::vector<int> iterations = {50, 30, 14};
+
+
+    std::vector<int> iterations = { 50, 30, 14 };
     Eigen::Matrix4d trans = Eigen::Matrix4d::Identity();
-    
-        auto result = pipelines::registration::RegistrationGeneralizedICP(
-                *source, *target, 0.07, resultFastGlobalTrans,
-                pipelines::registration::TransformationEstimationForGeneralizedICP(),
-                pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6,iterations[3]));
-      
-        //standard ICP
-        trans = result.transformation_;
- 
+
+    auto result = pipelines::registration::RegistrationGeneralizedICP(
+        *source, *target, 0.07, resultFastGlobalTrans,
+        pipelines::registration::TransformationEstimationForGeneralizedICP(),
+        pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, iterations[3]));
+
+    //standard ICP
+    trans = result.transformation_;
+
     //visualise the transformation
     VisualizeRegistration(*source, *target, trans);
     VisualizeRegistration(*source, *target, resultFastGlobalTrans);
-    
+
     //----------+++++++++++++++++++------------
 
     std::stringstream ss;
     ss << trans;
     utility::LogInfo("Final transformation = \n{}", ss.str());
- 
-    return 0;
-    
+
 }
+
+//int main(int argc, char *argv[]) {
+//    
+//    using namespace open3d;
+//    utility::SetVerbosityLevel(utility::VerbosityLevel::Debug);
+//
+//    //LOAD DATA-----------
+//    
+//    auto cloud_ptr_target = std::make_shared<geometry::PointCloud>();
+//    auto cloud_ptr_source = std::make_shared<geometry::PointCloud>();
+//    
+//    char *data = "C:/Users/afiqa/Open3D/examples/test_data/ICP/cloud_bin_1.pcd";
+//    char *dataSource = "C:/Users/afiqa//Open3D/examples/test_data/ICP/cloud_bin_0.pcd";
+//
+//    icpdata(data, dataSource);
+//    //------------------ Fast Global Transform++++++++++++++
+//    
+//  
+// 
+//    return 0;
+//    
+//}
